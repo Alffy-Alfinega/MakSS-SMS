@@ -15,6 +15,12 @@ Next.js 16.4.2 (App Router), Better Auth 1.7, Prisma 7 + PostgreSQL 18.
 
 Use npm (`package-lock.json` present). Don't edit `next-env.d.ts` (generated,
 gitignored). Never edit `src/generated/**` — regenerate instead.
+- **The Prisma Client is generated, not committed.** `src/generated/prisma` is
+  gitignored, so `postinstall: prisma generate` and
+  `build: prisma generate && next build` regenerate it. `prisma` is a
+  *dependency* (not a devDependency) so it survives a `NODE_ENV=production`
+  install on Vercel. `prisma generate` needs no database URL; `next build`
+  does (`src/lib/db.ts` throws at import time without `DATABASE_URL`).
 
 ## Structure
 

@@ -87,6 +87,48 @@ Neon's direct connection limit.
 treats `sslmode=require` as an alias for `verify-full`, but pg v9 adopts
 libpq semantics where `require` does **not** verify the server certificate.
 
+## Deploying to Vercel
+
+The Prisma Client is generated into `src/generated/prisma`, which is
+gitignored — so the build has to generate it. Two hooks make that reliable:
+
+- `postinstall: prisma generate` — the client is fresh after every install.
+- `build: prisma generate && next build` — the build regenerates before
+  Turbopack starts, in case install scripts were skipped.
+
+`prisma` is a **dependency**, not a devDependency, so it is still present when
+Vercel installs with `NODE_ENV=production`.
+
+`prisma generate` reads only the schema, so it works without a database URL.
+`next build` does need `DATABASE_URL` — `src/lib/db.ts` throws at import time
+if it is missing, and the build fails with that message. Set it in Vercel.
+
+### Environment variables
+
+Set these in **Project Settings → Environment Variables**:
+
+| Variable                | Scope            | Required | Notes                                              |
+| ----------------------- | ---------------- | -------- | -------------------------------------------------- |
+| `DATABASE_URL`          | All              | Yes      | Neon pooled endpoint — the app runtime             |
+| `DATABASE_URL_UNPOOLED` | All              | No       | Neon direct endpoint — only needed to run migrations |
+| `BETTER_AUTH_SECRET`    | All              | Yes      | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `BETTER_AUTH_URL`       | All              | Yes      | The production origin, e.g. `https://your-app.vercel.app` |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | Preview  | No       | e.g. `https://*.vercel.app` for preview deployments |
+
+`BETTER_AUTH_URL` must match the origin the app is served from — Better Auth
+rejects requests from other origins with `INVALID_ORIGIN`. Preview
+deployments get a different origin each time, so add them to
+`BETTER_AUTH_TRUSTED_ORIGINS` (glob patterns are supported).
+
+### Applying migrations to Neon
+
+Migrations are not run by the Vercel build. Apply them from your machine
+against the direct endpoint:
+
+```bash
+npm run db:deploy
+```
+
 ## Commands
 
 | Command                  | What it does                                        |
