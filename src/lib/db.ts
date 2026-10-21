@@ -4,10 +4,12 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 import pg from "pg";
 
-// Direct PostgreSQL connection over the standard wire protocol (no pooler).
-// `pg.Pool` here is a local socket pool, not a network pooler — the same URL
-// works for the app runtime and for Prisma migrations, so there is no
-// DATABASE_URL/DIRECT_URL split to keep in sync.
+// App runtime database. `DATABASE_URL` points at the pooled (pgbouncer)
+// endpoint so the app scales past Neon's direct connection limit.
+//
+// `keepAlive` matters here: pgbouncer and Neon can close idle server
+// connections, and without it the pool hands out a dead socket and the next
+// query fails with "terminating connection due to administrator command".
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error(
@@ -19,7 +21,8 @@ const pool = new pg.Pool({
   connectionString,
   max: 10,
   idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
+  connectionTimeoutMillis: 15_000,
+  keepAlive: true,
 });
 
 const globalForPrisma = globalThis as unknown as {

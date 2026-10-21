@@ -9,8 +9,9 @@ Next.js 16.4.2 (App Router), Better Auth 1.7, Prisma 7 + PostgreSQL 18.
 - Build: `npm run build` · Serve prod: `npm run start`
 - Lint: `npm run lint` · Typecheck: `npm run typecheck`
 - DB: `npm run db:migrate` · `npm run db:generate` · `npm run db:studio` · `npm run db:seed`
+- Apply migrations to Neon: `npm run db:deploy`
 - Regenerate Better Auth models: `npm run db:auth:schema`
-- Start the local Postgres cluster: `./scripts/db-start.sh`
+- Start the local Postgres fallback cluster: `./scripts/db-start.sh`
 
 Use npm (`package-lock.json` present). Don't edit `next-env.d.ts` (generated,
 gitignored). Never edit `src/generated/**` — regenerate instead.
@@ -24,10 +25,11 @@ gitignored). Never edit `src/generated/**` — regenerate instead.
 - `src/app/api/auth/[...all]/route.ts` — Better Auth route handler (`toNextJsHandler`)
 - `src/lib/auth.ts` — Better Auth server config (email + password, `additionalFields`, `nextCookies()`)
 - `src/lib/auth-client.ts` — Better Auth React client
-- `src/lib/db.ts` — Prisma singleton with the `PrismaPg` driver adapter
+- `src/lib/db.ts` — Prisma singleton with the `PrismaPg` driver adapter (pooled Neon endpoint)
 - `src/lib/session.ts` — session data access layer (`getCurrentUser`, `requireUser`)
 - `src/proxy.ts` — optimistic route protection for `/dashboard/*`
 - `prisma/schema.prisma` — Better Auth models (generated) + the `// ---------- Better Auth models ----------` marker
+- `prisma7.config.ts` — Prisma CLI config; the datasource URL lives here, not in `schema.prisma`
 - `scripts/` — `db-start.sh`, `generate-auth-schema.mjs`, `seed.mts`
 - Path alias: `@/*` → `./src/*`
 
@@ -86,12 +88,21 @@ Breaking changes that bite here (details in `node_modules/next/dist/docs/`):
   in `next.config.ts`.
 - **Prisma 7 requires a driver adapter** — `new PrismaClient()` bare fails
   type checking. Use `new PrismaClient({ adapter: new PrismaPg(pool) })`.
-- The datasource URL lives in `prisma7.config.ts` (not `schema.prisma`), so
-  the app runtime and the CLI share one direct, unpooled connection.
+- **Neon exposes two endpoints and the project uses each for what it can do.**
+  `DATABASE_URL` is the pooled (pgbouncer) endpoint used by the app runtime;
+  `DATABASE_URL_UNPOOLED` is the direct endpoint used by Prisma migrations
+  (DDL and the shadow database need a real session the pooler cannot give).
+  `prisma7.config.ts` reads the unpooled URL and falls back to `DATABASE_URL`
+  so a local cluster works with one variable set.
+- **Keep `sslmode=verify-full` explicit.** `pg-connection-string` v2 aliases
+  `require` to `verify-full`, but pg v9 adopts libpq semantics where
+  `require` does not verify the server certificate.
+- The `pg` pool sets `keepAlive: true` — pgbouncer and Neon can close idle
+  server connections, and without it the pool hands out a dead socket.
 - `pg` and `@prisma/adapter-pg` are listed in `serverExternalPackages` — their
   socket/TLS stack breaks when bundled.
-- The local PostgreSQL cluster is user-owned (`~/.local/pgdata`) because the
-  system service needs root. Start it with `./scripts/db-start.sh`.
+- The local PostgreSQL cluster is a fallback only (user-owned, `~/.local/pgdata`);
+  the system service needs root. Start it with `./scripts/db-start.sh`.
 - `src/generated/prisma` is gitignored — run `npm run db:generate` after
   cloning.
 

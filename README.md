@@ -12,48 +12,36 @@ Better Auth and a direct PostgreSQL connection.
 | Language    | TypeScript (strict)                                 |
 | Styling     | Tailwind CSS v4 (CSS-first config)                  |
 | Auth        | Better Auth 1.7 (email + password)                  |
-| Database    | PostgreSQL 18, direct connection (no pooler)        |
+| Database    | Neon PostgreSQL 18, pooled endpoint + direct endpoint |
 | ORM         | Prisma 7 with the `pg` driver adapter               |
 
 ## Getting started
 
-### 1. PostgreSQL
-
-The local development cluster lives outside the repo, so it survives a fresh
-clone. Start it with:
-
-```bash
-./scripts/db-start.sh
-```
-
-This starts a user-owned PostgreSQL 18 cluster and creates the `makss` role
-and `makss_sms` database if they do not exist yet. Connection details are in
-`.env.example`.
-
-### 2. Environment
+### 1. Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Set `BETTER_AUTH_SECRET` to a fresh 32-byte hex string:
+Fill in the Neon connection strings. Then set `BETTER_AUTH_SECRET` to a
+fresh 32-byte hex string:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 `BETTER_AUTH_URL` must match the origin the app is served from — Better Auth
-rejects requests from other origins.
+rejects requests from other origins with `INVALID_ORIGIN`.
 
-### 3. Install and set up the database
+### 2. Install and set up the database
 
 ```bash
 npm install
-npm run db:migrate      # applies migrations
-npm run db:generate     # generates Prisma Client into src/generated/prisma
+npm run db:deploy      # applies migrations to Neon (direct endpoint)
+npm run db:generate    # generates Prisma Client into src/generated/prisma
 ```
 
-### 4. Seed the first administrator
+### 3. Seed the first administrator
 
 ```bash
 SEED_ADMIN_EMAIL=you@school.test \
@@ -63,11 +51,41 @@ SEED_ADMIN_ROLE=admin \
 npm run db:seed
 ```
 
-### 5. Run
+### 4. Run
 
 ```bash
 npm run dev    # http://localhost:3000
 ```
+
+### Local PostgreSQL (optional fallback)
+
+Neon is the database of record, but a local cluster is available for offline
+work. `./scripts/db-start.sh` starts a user-owned PostgreSQL 18 cluster in
+`~/.local/pgdata` and creates the `makss` role and `makss_sms` database. The
+system service needs root, so this runs its own cluster instead.
+
+To use it, point `DATABASE_URL` at `postgresql://makss:makss_local_dev@127.0.0.1:5432/makss_sms`
+and leave `DATABASE_URL_UNPOOLED` unset — the Prisma config falls back to
+`DATABASE_URL` for migrations.
+
+## The two connection strings
+
+Neon exposes the same database through two endpoints, and the project uses
+each one for the job it can actually do:
+
+| Variable                | Endpoint     | Used by                        |
+| ----------------------- | ------------ | ------------------------------ |
+| `DATABASE_URL`          | Pooled (pgbouncer) | The app runtime           |
+| `DATABASE_URL_UNPOOLED` | Direct       | Prisma migrations and the CLI  |
+
+Migrations need a direct connection: schema DDL and the migration engine's
+shadow database require a real session, which pgbouncer's transaction pooler
+cannot provide. The app runtime goes through the pooler so it scales past
+Neon's direct connection limit.
+
+`sslmode=verify-full` is explicit on purpose. `pg-connection-string` v2
+treats `sslmode=require` as an alias for `verify-full`, but pg v9 adopts
+libpq semantics where `require` does **not** verify the server certificate.
 
 ## Commands
 
@@ -79,7 +97,7 @@ npm run dev    # http://localhost:3000
 | `npm run lint`           | ESLint (flat config)                                |
 | `npm run typecheck`      | `next typegen` + `tsc --noEmit`                     |
 | `npm run db:migrate`     | Create + apply a migration                          |
-| `npm run db:deploy`      | Apply pending migrations (production)               |
+| `npm run db:deploy`      | Apply pending migrations (production, Neon)        |
 | `npm run db:generate`    | Regenerate Prisma Client                            |
 | `npm run db:studio`      | Prisma Studio                                       |
 | `npm run db:seed`        | Seed the first administrator                        |
